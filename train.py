@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from netvlad import VGG16NetVLAD
+import wandb
 
 def save_model(model):
     torch.save(model.state_dict(), "vgg16_netvlad.pth")
@@ -11,12 +12,18 @@ def load_model():
     return model
 
 def train_model(model, criterion, optimizer, epochs, train_loader, val_loader):
-    for epoch in range(epochs):
-        model.train()
-        running_loss = 0.0
+    wandb.init(project="netvlad_rgb_brisbane", config={"epochs": epochs})
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Training on {device}")
+    model = model.to(device)
+    model.train()
+    running_loss = 0.0
+
+    for epoch in range(epochs):
         # Training step
         for batch_idx, (anchor, positive, negative) in enumerate(train_loader):
+            anchor, positive, negative = anchor.to(device), positive.to(device), negative.to(device)
             optimizer.zero_grad()
 
             # Forward passes
@@ -29,6 +36,9 @@ def train_model(model, criterion, optimizer, epochs, train_loader, val_loader):
 
             # Backward pass and optim step
             loss.backward()
+
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+
             optimizer.step()
             running_loss += loss.item()
     
@@ -40,6 +50,8 @@ def train_model(model, criterion, optimizer, epochs, train_loader, val_loader):
         # Validation step
         with torch.no_grad():
             for batch_idx, (anchor, positive, negative) in enumerate(val_loader):
+                anchor, positive, negative = anchor.to(device), positive.to(device), negative.to(device)
+
                 anchor_output = model(anchor)
                 positive_output = model(positive)
                 negative_output = model(negative)
@@ -49,6 +61,12 @@ def train_model(model, criterion, optimizer, epochs, train_loader, val_loader):
             val_loss /= batch_idx
 
         print(f"Epoch [{epoch+1}/{epochs}], Training Loss:{running_loss}, Val Loss:{val_loss}")
+
+        wandb.log({
+            "train_loss": running_loss,
+            "val_loss": val_loss,
+        })
+    wandb.finish()
     save_model(model)
 
 
